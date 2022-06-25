@@ -1,29 +1,20 @@
-#![allow(unused_variables)]
+mod convolution;
+mod fft;
+mod plugin;
+mod ui;
+
+// #![allow(unused_variables)]
+// #![allow(unused_imports)]
+// #![allow(dead_code)]
+
 use std::io;
 
+use crate::plugin::AudioPlugin;
+use crate::ui::UI;
+
 fn main() -> io::Result<()> {
-    // only support f32 for now
-    let mut reader = hound::WavReader::open("data/ir_f32.wav").unwrap();
-    println!("{}", reader.spec().channels);
+    let file_name = "data/ir.wav";
 
-    let mut iter = reader.samples::<f32>();
-
-    let length = iter.len();
-    println!("{}", length);
-
-    let mut ir_l: Vec<f32> = Vec::with_capacity(iter.len() / 2);
-    let mut ir_r: Vec<f32> = Vec::with_capacity(iter.len() / 2);
-
-    for _ in 1..iter.len() {
-        if let Some(Ok(s)) = iter.next() {
-            ir_l.push(s);
-        }
-        if let Some(Ok(s)) = iter.next() {
-            ir_r.push(s);
-        }
-    }
-
-    let mut i = 0;
     // 1. open a client
     let (client, _status) =
         jack::Client::new("convolution", jack::ClientOptions::NO_START_SERVER).unwrap();
@@ -43,7 +34,11 @@ fn main() -> io::Result<()> {
         .unwrap();
 
     // 3. define process callback handler
-    let _sample_rate = client.sample_rate();
+    let sample_rate = client.sample_rate();
+    println!("jack sample rate: {}", sample_rate);
+
+    let (tx, mut plugin) = AudioPlugin::new(sample_rate);
+
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
             // Get output buffer
@@ -51,28 +46,11 @@ fn main() -> io::Result<()> {
             let out2 = out2_port.as_mut_slice(ps);
             let in2 = in2_port.as_slice(ps);
             let in1 = in1_port.as_slice(ps);
-            let stereo_buffer = out1.iter_mut().zip(out2.iter_mut());
+            let input = [in1, in2];
+            let mut output = [out1, out2];
 
-            // DSP
-            for (l, r) in stereo_buffer {
-                if i < length / 2 {
-                    *l = ir_l[i];
-                    *r = ir_r[i];
-                } else {
-                    *l = 0.0;
-                    *r = 0.0;
-                }
+            plugin.process(&input, &mut output);
 
-                i += 1;
-
-                if i as f32 > length as f32 * 0.55 {
-                    i = 0;
-                }
-            }
-
-            // out1.copy_from_slice(in1);
-            // out2.copy_from_slice(in2);
-            //
             // Continue as normal
             jack::Control::Continue
         },
@@ -82,6 +60,8 @@ fn main() -> io::Result<()> {
     let _active_client = client.activate_async((), process).unwrap();
 
     // event loop
+    let mut ui = UI::new(tx);
+    ui.load_impulse_response(file_name);
     let mut buffer = String::new();
     let stdin = io::stdin();
     stdin.read_line(&mut buffer)?;
