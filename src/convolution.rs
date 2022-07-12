@@ -217,7 +217,7 @@ pub struct Convolution {
 }
 
 impl Convolution {
-    pub fn new_with_impulse_data() {}
+    // pub fn new_with_impulse_data() {}
     pub fn new(fft_size: usize) -> Self {
         Self {
             engines: None,
@@ -259,5 +259,57 @@ impl Convolution {
                 e[i].process(input[i], output[i]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConvolutionEngine;
+
+    #[test]
+    fn rms_error() {
+        const SIGNAL_LENGTH: usize = 2048;
+        const BUFFER_SIZE: usize = 1024;
+        // input signal
+        let mut input: Vec<f32> = Vec::new();
+        let ones = [1.0; SIGNAL_LENGTH];
+        let tailing_zeros = [0.0; SIGNAL_LENGTH];
+        input.extend_from_slice(&ones);
+        input.extend_from_slice(&tailing_zeros);
+
+        // impulse response
+        let ir = [1.0; SIGNAL_LENGTH];
+        let mut engine = ConvolutionEngine::new(&ir, 1024);
+
+        // output signal
+        let mut output = Vec::new();
+        output.resize(SIGNAL_LENGTH * 2, 0.0);
+        for i in 0..output.len() / BUFFER_SIZE {
+            engine.process(
+                &input[i * BUFFER_SIZE..(i + 1) * BUFFER_SIZE],
+                &mut output[i * BUFFER_SIZE..(i + 1) * BUFFER_SIZE],
+            );
+        }
+
+        // expected output
+        let mut expected_output: Vec<f32> = Vec::new();
+        expected_output.resize(SIGNAL_LENGTH * 2 - 1, 0.0);
+        for i in 0..SIGNAL_LENGTH {
+            expected_output[i] = i as f32 + 1.0;
+        }
+        for (index, s) in expected_output[SIGNAL_LENGTH..].iter_mut().enumerate() {
+            *s = SIGNAL_LENGTH as f32 - 1.0 - index as f32;
+        }
+
+        // compute RMS error
+        let mut sum = 0.0;
+        for (o, e) in output[..output.len() - 1]
+            .iter()
+            .zip(expected_output.iter())
+        {
+            sum += (o - e).powi(2);
+        }
+        println!("RMS error: {}", (sum / (SIGNAL_LENGTH as f32 * 2.0 - 1.0)).sqrt());
+        // eprintln!("{:?}", output);
     }
 }

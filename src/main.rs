@@ -2,18 +2,19 @@ mod convolution;
 mod fft;
 mod plugin;
 mod ui;
+mod app;
 
 // #![allow(unused_variables)]
 // #![allow(unused_imports)]
 // #![allow(dead_code)]
 
 use std::io;
+use crate::app::app;
 
 use crate::plugin::AudioPlugin;
-use crate::ui::UI;
+
 
 fn main() -> io::Result<()> {
-    let file_name = "data/ir.wav";
 
     // 1. open a client
     let (client, _status) =
@@ -37,7 +38,8 @@ fn main() -> io::Result<()> {
     let sample_rate = client.sample_rate();
     println!("jack sample rate: {}", sample_rate);
 
-    let (tx, mut plugin) = AudioPlugin::new(sample_rate);
+    let (tx, mut plugin) = AudioPlugin::new();
+    plugin.prepare_to_play(sample_rate, client.buffer_size() as usize);
 
     let process = jack::ClosureProcessHandler::new(
         move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
@@ -59,12 +61,8 @@ fn main() -> io::Result<()> {
     // 4. activate the client
     let _active_client = client.activate_async((), process).unwrap();
 
-    // event loop
-    let mut ui = UI::new(tx);
-    ui.load_impulse_response(file_name);
-    let mut buffer = String::new();
-    let stdin = io::stdin();
-    stdin.read_line(&mut buffer)?;
+    // open GUI
+    app(tx);
 
     // 6. Optional deactivate. Not required since active_client will deactivate on
     // drop, though explicit deactivate may help you identify errors in

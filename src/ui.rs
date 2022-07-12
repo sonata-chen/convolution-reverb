@@ -47,10 +47,10 @@ impl UI {
 
         for _ in 1..iter.len() {
             if let Some(Ok(s)) = iter.next() {
-                ir_l.push(0.00004 * s);
+                ir_l.push(s);
             }
             if let Some(Ok(s)) = iter.next() {
-                ir_r.push(0.00004 * s);
+                ir_r.push(s);
             }
         }
         let ir = Arc::new(vec![ir_l, ir_r]);
@@ -60,5 +60,8 @@ impl UI {
             .unwrap();
 
         self.impulse_response = Some(ir);
+    }
+    pub fn send_message<F>(&mut self, f: F) where F: Fn(&mut mpsc::SyncSender<Message>) {
+        f(&mut self.tx);
     }
 }
