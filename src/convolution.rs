@@ -249,14 +249,18 @@ impl Convolution {
         }
         self.engines = Some(engines);
     }
-    pub fn process(&mut self, input: &[&[f32]], output: &mut [&mut [f32]]) {
+    pub fn process<I, O>(&mut self, input: &[I], output: &mut [O])
+    where
+        I: AsRef<[f32]>,
+        O: AsMut<[f32]>,
+    {
         if let Some(e) = &mut self.engines {
             let num_input_channels = input.len();
             let num_output_channels = output.len();
             let num_channels = usize::min(num_input_channels, num_output_channels);
 
             for i in 0..num_channels {
-                e[i].process(input[i], output[i]);
+                e[i].process(input[i].as_ref(), output[i].as_mut());
             }
         }
     }
@@ -309,7 +313,10 @@ mod tests {
         {
             sum += (o - e).powi(2);
         }
-        println!("RMS error: {}", (sum / (SIGNAL_LENGTH as f32 * 2.0 - 1.0)).sqrt());
+        println!(
+            "RMS error: {}",
+            (sum / (SIGNAL_LENGTH as f32 * 2.0 - 1.0)).sqrt()
+        );
         // eprintln!("{:?}", output);
     }
 }

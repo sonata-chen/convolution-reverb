@@ -1,17 +1,16 @@
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::sync::Arc;
 
 use crate::plugin;
 use crate::plugin::Message;
 
 pub struct UI {
-    tx: mpsc::SyncSender<Message>,
+    tx: crossbeam::channel::Sender<Message>,
     impulse_response: Option<Arc<Vec<Vec<f32>>>>,
 }
 
 impl UI {
-    pub fn new(tx: mpsc::SyncSender<Message>) -> Self {
+    pub fn new(tx: crossbeam::channel::Sender<Message>) -> Self {
         Self {
             tx,
             impulse_response: None,
@@ -61,7 +60,7 @@ impl UI {
 
         self.impulse_response = Some(ir);
     }
-    pub fn send_message<F>(&mut self, f: F) where F: Fn(&mut mpsc::SyncSender<Message>) {
+    pub fn send_message<F>(&mut self, f: F) where F: Fn(&mut crossbeam::channel::Sender<Message>) {
         f(&mut self.tx);
     }
 }
