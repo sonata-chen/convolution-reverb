@@ -185,7 +185,7 @@ impl Plugin for ConvolutionReverb {
 
 impl ClapPlugin for ConvolutionReverb {
     const CLAP_ID: &'static str = "com.example.convolution";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("convolutional reverb");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("convolution reverb");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
@@ -197,7 +197,7 @@ impl ClapPlugin for ConvolutionReverb {
 }
 
 impl Vst3Plugin for ConvolutionReverb {
-    const VST3_CLASS_ID: [u8; 16] = *b"ConvolutionalRVB";
+    const VST3_CLASS_ID: [u8; 16] = *b"ConvolutionRverb";
     const VST3_CATEGORIES: &'static str = "Fx|Dynamics";
 }
 
