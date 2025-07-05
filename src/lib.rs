@@ -1,6 +1,6 @@
 use atomic_float::AtomicF32;
 use nih_plug::prelude::*;
-use nih_plug_vizia::ViziaState;
+use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
 use std::sync::Arc;
 
 mod convolution;
@@ -13,7 +13,6 @@ mod ui;
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
 pub struct ConvolutionReverb {
     params: Arc<PlugParams>,
-    editor_state: Arc<ViziaState>,
 
     internal: plugin::AudioPlugin,
     tx: crossbeam::channel::Sender<plugin::Message>,
@@ -31,6 +30,11 @@ pub struct ConvolutionReverb {
 
 #[derive(Params)]
 struct PlugParams {
+    /// The editor state, saved together with the parameter state so the custom scaling can be
+    /// restored.
+    #[persist = "editor-state"]
+    editor_state: Arc<ViziaState>,
+
     #[id = "gain"]
     pub gain: FloatParam,
 
@@ -43,7 +47,6 @@ impl Default for ConvolutionReverb {
         let (tx, plugin) = plugin::AudioPlugin::new();
         Self {
             params: Arc::new(PlugParams::default()),
-            editor_state: ViziaState::from_size(200, 150),
 
             internal: plugin,
             tx,
@@ -57,6 +60,7 @@ impl Default for ConvolutionReverb {
 impl Default for PlugParams {
     fn default() -> Self {
         Self {
+            editor_state: editor::default_state(),
             gain: FloatParam::new(
                 "Gain",
                 0.0,
@@ -82,8 +86,20 @@ impl Plugin for ConvolutionReverb {
 
     const VERSION: &'static str = "0.0.1";
 
-    const DEFAULT_NUM_INPUTS: u32 = 2;
-    const DEFAULT_NUM_OUTPUTS: u32 = 2;
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(1),
+            ..AudioIOLayout::const_default()
+        },
+    ];
+     type SysExMessage = ();
+     type BackgroundTask = ();
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
@@ -91,33 +107,33 @@ impl Plugin for ConvolutionReverb {
         self.params.clone()
     }
 
-    fn editor(&self) -> Option<Box<dyn Editor>> {
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         editor::create(
             self.params.clone(),
-            self.editor_state.clone(),
+            self.params.editor_state.clone(),
             self.tx.clone(),
         )
     }
 
-    fn accepts_bus_config(&self, config: &BusConfig) -> bool {
-        // This works with any symmetrical IO layout
-        config.num_input_channels == 2
-            && config.num_input_channels == config.num_output_channels
-            && config.num_input_channels > 0
-    }
+    // fn accepts_bus_config(&self, config: &BusConfig) -> bool {
+    //     // This works with any symmetrical IO layout
+    //     config.num_input_channels == 2
+    //         && config.num_input_channels == config.num_output_channels
+    //         && config.num_input_channels > 0
+    // }
 
     fn initialize(
         &mut self,
-        bus_config: &BusConfig,
+        audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext,
+        _context: &mut impl InitContext<Self>,
     ) -> bool {
         // TODO: How do you tie this exponential decay to an actual time span?
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
 
         self.input_buffer.resize(
-            bus_config.num_input_channels as usize,
-            vec![0.0; dbg!{buffer_config.max_buffer_size as usize}],
+            dbg!{audio_io_layout.main_input_channels.unwrap().into_integer()} as usize,
+            vec![0.0; dbg! {buffer_config.max_buffer_size as usize}],
         );
 
         true
@@ -127,7 +143,7 @@ impl Plugin for ConvolutionReverb {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext,
+        _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         /*
         for channel_samples in buffer.iter_samples() {
@@ -157,9 +173,9 @@ impl Plugin for ConvolutionReverb {
             }
         }
         */
-        if !self.params.bypassed.value {
+        if !self.params.bypassed.value() {
             let num_channels = buffer.channels();
-            let num_frames = buffer.len();
+            let num_frames = buffer.samples();
             for c in 0..num_channels {
                 for s in 0..num_frames {
                     self.input_buffer[c][s] = buffer.as_slice_immutable()[c][s];
@@ -198,7 +214,8 @@ impl ClapPlugin for ConvolutionReverb {
 
 impl Vst3Plugin for ConvolutionReverb {
     const VST3_CLASS_ID: [u8; 16] = *b"ConvolutionRverb";
-    const VST3_CATEGORIES: &'static str = "Fx|Dynamics";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
 }
 
 nih_export_clap!(ConvolutionReverb);

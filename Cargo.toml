@@ -1,7 +1,7 @@
 [package]
 name = "convolution"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 [lib]
 # The `lib` artifact is needed for the standalone target
