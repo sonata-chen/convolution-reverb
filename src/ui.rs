@@ -5,7 +5,7 @@ use crate::plugin;
 use crate::plugin::Message;
 
 pub struct UI {
-    tx: crossbeam::channel::Sender<Message>,
+    pub(crate) tx: crossbeam::channel::Sender<Message>,
     impulse_response: Option<Arc<Vec<Vec<f32>>>>,
 }
 
@@ -18,6 +18,10 @@ impl UI {
     }
     pub fn load_impulse_response(&mut self, file_name: &str) {
         let file = PathBuf::from(file_name);
+
+        self.tx
+            .send(plugin::Message::Impulse(Arc::new(Vec::new())))
+            .unwrap();
 
         // if !file_name.is_file() {
         //     let file = FileDialog::new()
@@ -60,7 +64,10 @@ impl UI {
 
         self.impulse_response = Some(ir);
     }
-    pub fn send_message<F>(&mut self, f: F) where F: Fn(&mut crossbeam::channel::Sender<Message>) {
+    pub fn send_message<F>(&mut self, f: F)
+    where
+        F: Fn(&mut crossbeam::channel::Sender<Message>),
+    {
         f(&mut self.tx);
     }
 }

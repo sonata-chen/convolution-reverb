@@ -1,13 +1,15 @@
 use atomic_float::AtomicF32;
 use nih_plug::prelude::*;
 use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
+use plugin::Message;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 mod convolution;
 mod editor;
 mod fft;
 mod plugin;
-mod ui;
+// mod ui;
 // mod editor;
 
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
@@ -30,16 +32,19 @@ pub struct ConvolutionReverb {
 
 #[derive(Params)]
 struct PlugParams {
-    /// The editor state, saved together with the parameter state so the custom scaling can be
-    /// restored.
-    #[persist = "editor-state"]
-    editor_state: Arc<ViziaState>,
-
     #[id = "gain"]
     pub gain: FloatParam,
 
     #[id = "bypassed"]
     pub bypassed: BoolParam,
+
+    /// The editor state, saved together with the parameter state so the custom scaling can be
+    /// restored.
+    #[persist = "editor-state"]
+    editor_state: Arc<ViziaState>,
+
+    #[persist = "impulse"]
+    impulse: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Default for ConvolutionReverb {
@@ -60,7 +65,6 @@ impl Default for ConvolutionReverb {
 impl Default for PlugParams {
     fn default() -> Self {
         Self {
-            editor_state: editor::default_state(),
             gain: FloatParam::new(
                 "Gain",
                 0.0,
@@ -74,6 +78,8 @@ impl Default for PlugParams {
             .with_unit(" dB"),
 
             bypassed: BoolParam::new("Bypassed", false),
+            editor_state: editor::default_state(),
+            impulse: Arc::new(Mutex::new(Vec::default())),
         }
     }
 }
@@ -98,8 +104,8 @@ impl Plugin for ConvolutionReverb {
             ..AudioIOLayout::const_default()
         },
     ];
-     type SysExMessage = ();
-     type BackgroundTask = ();
+    type SysExMessage = ();
+    type BackgroundTask = ();
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
@@ -132,9 +138,15 @@ impl Plugin for ConvolutionReverb {
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
 
         self.input_buffer.resize(
-            dbg!{audio_io_layout.main_input_channels.unwrap().into_integer()} as usize,
+            dbg! {audio_io_layout.main_input_channels.unwrap().into_integer()} as usize,
             vec![0.0; dbg! {buffer_config.max_buffer_size as usize}],
         );
+        {
+            let ir = self.params.impulse.lock().unwrap();
+            if !ir.is_empty() {
+                self.tx.send(Message::Impulse(ir.clone())).unwrap();
+            }
+        }
 
         true
     }
@@ -181,7 +193,8 @@ impl Plugin for ConvolutionReverb {
                     self.input_buffer[c][s] = buffer.as_slice_immutable()[c][s];
                 }
             }
-            self.internal.process(&self.input_buffer, buffer.as_slice());
+            self.internal
+                .process(&self.input_buffer, buffer.as_slice(), &self.params);
         }
 
         for channel_samples in buffer.iter_samples() {
