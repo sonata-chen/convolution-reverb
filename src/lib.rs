@@ -1,4 +1,3 @@
-use atomic_float::AtomicF32;
 use nih_plug::prelude::*;
 use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
 use plugin::Message;
@@ -9,8 +8,6 @@ mod convolution;
 mod editor;
 mod fft;
 mod plugin;
-// mod ui;
-// mod editor;
 
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
 pub struct ConvolutionReverb {
@@ -121,13 +118,6 @@ impl Plugin for ConvolutionReverb {
         )
     }
 
-    // fn accepts_bus_config(&self, config: &BusConfig) -> bool {
-    //     // This works with any symmetrical IO layout
-    //     config.num_input_channels == 2
-    //         && config.num_input_channels == config.num_output_channels
-    //         && config.num_input_channels > 0
-    // }
-
     fn initialize(
         &mut self,
         audio_io_layout: &AudioIOLayout,
@@ -138,8 +128,8 @@ impl Plugin for ConvolutionReverb {
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
 
         self.input_buffer.resize(
-            dbg! {audio_io_layout.main_input_channels.unwrap().into_integer()} as usize,
-            vec![0.0; dbg! {buffer_config.max_buffer_size as usize}],
+            audio_io_layout.main_input_channels.unwrap().into_integer() as usize,
+            vec![0.0; buffer_config.max_buffer_size as usize],
         );
         {
             let ir = self.params.impulse.lock().unwrap();

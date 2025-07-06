@@ -70,11 +70,11 @@ impl ConvolutionEngine {
         // Initialize input segments
         let buffers_input_segments = vec![r2c.make_output_vec(); num_input_segments];
 
-        println!("input block size: {}", input_block_size);
-        println!("fft size: {}", fft_size);
+        println!("input block size: {input_block_size}");
+        println!("fft size: {fft_size}");
         println!("filter block size: {}", fft_size - input_block_size);
-        println!("num of impulse segments: {}", num_segments);
-        println!("num of input segments: {}", num_input_segments);
+        println!("num of impulse segments: {num_segments}",);
+        println!("num of input segments: {num_input_segments}",);
         ConvolutionEngine {
             input_block_size,
             fft_size,
