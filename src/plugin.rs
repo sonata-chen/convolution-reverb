@@ -19,7 +19,7 @@ impl AudioPlugin {
         (
             tx,
             Self {
-                convolution_node: Convolution::new(4096),
+                convolution_node: Convolution::new(1024),
                 sample_rate: 0,
                 buffer_size: 0,
                 input_buffer: Vec::new(),

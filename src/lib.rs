@@ -1,3 +1,6 @@
+#![feature(portable_simd)]
+#![feature(allocator_api)]
+
 use nih_plug::prelude::*;
 use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
 use plugin::Message;
@@ -8,6 +11,7 @@ mod convolution;
 mod editor;
 mod fft;
 mod plugin;
+mod allocator;
 
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
 pub struct ConvolutionReverb {

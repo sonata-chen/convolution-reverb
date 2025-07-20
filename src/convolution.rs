@@ -1,21 +1,24 @@
+use crate::allocator::{AlignedAllocator, ALIGNED};
 use crate::fft::FFT;
 
 use realfft::RealFftPlanner;
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::Zero;
+use std::mem::transmute;
+use std::simd::prelude::*;
 
 pub struct ConvolutionEngine {
     input_block_size: usize,
     fft_size: usize,
     num_segments: usize,
     num_input_segments: usize,
-    buffers_impulse_segments: Vec<Vec<Complex<f32>>>,
-    buffers_input_segments: Vec<Vec<Complex<f32>>>,
+    buffers_impulse_segments: Vec<Vec<Complex<f32>, AlignedAllocator>>,
+    buffers_input_segments: Vec<Vec<Complex<f32>, AlignedAllocator>>,
 
     buffer_input: Vec<f32>,
-    buffer_c_output: Vec<Complex<f32>>,
+    buffer_c_output: Vec<Complex<f32>, AlignedAllocator>,
     buffer_r_output: Vec<f32>,
-    buffer_temp_output: Vec<Complex<f32>>,
+    buffer_temp_output: Vec<Complex<f32>, AlignedAllocator>,
     buffer_overlap: Vec<f32>,
 
     input_position: usize,
@@ -34,8 +37,10 @@ impl ConvolutionEngine {
             4 * input_block_size
         };
 
+        let impulse_block_size = fft_size - input_block_size;
+
         let mut real_planner = RealFftPlanner::<f32>::new();
-        let num_segments = samples.len() / (fft_size - input_block_size) + 1;
+        let num_segments = samples.len() / (impulse_block_size) + 1;
 
         let num_input_segments = if input_block_size > 128 {
             num_segments
@@ -48,31 +53,45 @@ impl ConvolutionEngine {
 
         // Initialize impulse segments
         let r2c = real_planner.plan_fft_forward(fft_size);
-        let mut buffers_impulse_segments: Vec<Vec<Complex<f32>>> =
-            vec![r2c.make_output_vec(); num_segments];
+        let mut buffers_impulse_segments: Vec<Vec<Complex<f32>, AlignedAllocator>> =
+            Vec::with_capacity(num_segments);
 
         let mut scratch = r2c.make_scratch_vec();
-        let mut temp = Vec::from(samples);
-        for _ in 0..(fft_size - input_block_size) {
-            temp.push(0.0);
-        }
+        let mut samples_zeros = Vec::from(samples);
+        samples_zeros.resize(samples_zeros.len() + impulse_block_size, 0.0);
 
-        let temp_itr = temp.chunks_exact_mut(fft_size - input_block_size);
-        let buf_itr = buffers_impulse_segments.iter_mut();
-        let zip = temp_itr.zip(buf_itr);
-        for (r, c) in zip {
-            let mut input = r2c.make_input_vec();
-            (&mut input[..fft_size - input_block_size]).copy_from_slice(r);
-            r2c.process_with_scratch(&mut input, c, &mut scratch)
+        for impulse_block in samples_zeros.chunks_exact(impulse_block_size) {
+            let mut real_vector = r2c.make_input_vec();
+            real_vector[..fft_size - input_block_size].copy_from_slice(impulse_block);
+
+            let mut complex_vector: Vec<Complex<f32>, AlignedAllocator> =
+                Vec::with_capacity_in(r2c.complex_len(), ALIGNED);
+            complex_vector.resize(r2c.complex_len(), Complex::default());
+            r2c.process_with_scratch(&mut real_vector, &mut complex_vector, &mut scratch)
                 .unwrap();
+            buffers_impulse_segments.push(complex_vector);
         }
 
         // Initialize input segments
-        let buffers_input_segments = vec![r2c.make_output_vec(); num_input_segments];
+        let mut buffers_input_segments = Vec::with_capacity(num_input_segments);
+        buffers_input_segments.resize_with(num_input_segments, || {
+            let mut complex_vector: Vec<Complex<f32>, AlignedAllocator> =
+                Vec::with_capacity_in(r2c.complex_len(), ALIGNED);
+            complex_vector.resize(r2c.complex_len(), Complex::default());
+            complex_vector
+        });
+
+        let mut buffer_c_output: Vec<Complex<f32>, AlignedAllocator> =
+            Vec::with_capacity_in(r2c.complex_len(), ALIGNED);
+        buffer_c_output.resize(r2c.complex_len(), Complex::default());
+
+        let mut buffer_temp_output: Vec<Complex<f32>, AlignedAllocator> =
+            Vec::with_capacity_in(r2c.complex_len(), ALIGNED);
+        buffer_temp_output.resize(r2c.complex_len(), Complex::default());
 
         println!("input block size: {input_block_size}");
         println!("fft size: {fft_size}");
-        println!("filter block size: {}", fft_size - input_block_size);
+        println!("filter block size: {impulse_block_size}");
         println!("num of impulse segments: {num_segments}",);
         println!("num of input segments: {num_input_segments}",);
         ConvolutionEngine {
@@ -84,9 +103,9 @@ impl ConvolutionEngine {
             buffers_input_segments,
 
             buffer_input: vec![f32::zero(); fft_size],
-            buffer_c_output: vec![Complex::zero(); fft_size],
+            buffer_c_output,
             buffer_r_output: vec![f32::zero(); fft_size],
-            buffer_temp_output: vec![Complex::zero(); fft_size],
+            buffer_temp_output,
             buffer_overlap: vec![f32::zero(); fft_size],
 
             input_position: 0,
@@ -199,9 +218,48 @@ impl ConvolutionEngine {
         impulse: &[Complex<f32>],
         output: &mut [Complex<f32>],
     ) {
-        let input = input.iter();
-        let impulse = impulse.iter();
-        let output = output.iter_mut();
+        let (_, impulses, impulses_suffix) = unsafe {
+            let impulse_ptr: *const f32 = transmute(impulse.as_ptr());
+            std::slice::from_raw_parts(impulse_ptr, impulse.len() * 2).as_simd()
+        };
+        let (_, inputs, inputs_suffix) = unsafe {
+            let input_ptr: *const f32 = transmute(input.as_ptr());
+            std::slice::from_raw_parts(input_ptr, input.len() * 2).as_simd()
+        };
+        let (_, outputs, outputs_suffix) = unsafe {
+            let output_ptr: *mut f32 = transmute(output.as_ptr());
+            std::slice::from_raw_parts_mut(output_ptr, output.len() * 2).as_simd_mut()
+        };
+
+        for i in 0..inputs.len() {
+            // [R0, I0, R1, I1, R2, I2, R3, I3]
+            let impulse_v: Simd<f32, 8> = impulses[i];
+            // [r0, i0, r1, i1, r2, i2, r3, i3]
+            let input_v: Simd<f32, 8> = inputs[i];
+
+            // [r0R0, i0I0, r1R1, i1I1, r2R2, i2I2, r3R3, i3I3]
+            let reals = input_v * impulse_v;
+            let reals_n = -reals;
+
+            // [r0R0, -i0I0, r1R1, -i1I1, r2R2, -i2I2, r3R3, -i3I3]
+            let reals = core::simd::simd_swizzle!(reals, reals_n, [0, 9, 2, 11, 4, 13, 6, 15]);
+            // [r0I0, i0R0, r1I1, i1R1, r2I2, i2R2, r3I3, i3R3]
+            let imaginary =
+                input_v * core::simd::simd_swizzle!(impulse_v, [1, 0, 3, 2, 5, 4, 7, 6]);
+
+            // [r0R0, r0I0, r1R1, r1I1, r2R2, r2I2, r3R3, r3I3]
+            let first_half =
+                core::simd::simd_swizzle!(reals, imaginary, [0, 8, 2, 10, 4, 12, 6, 14]);
+            // [-i0I0, i0R0, -i1I1, i1R1, -i2I2, i2R2, -i3I3, i3R3]
+            let second_half =
+                core::simd::simd_swizzle!(reals, imaginary, [1, 9, 3, 11, 5, 13, 7, 15]);
+
+            outputs[i] += first_half + second_half;
+        }
+
+        let input = inputs_suffix.iter();
+        let impulse = impulses_suffix.iter();
+        let output = outputs_suffix.iter_mut();
 
         for ((i, im), o) in input.zip(impulse).zip(output) {
             *o += *i * *im;
