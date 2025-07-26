@@ -11,7 +11,6 @@ crate-type = ["cdylib", "lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hound = "3.4.0"
 # jack = "0.8.4"
 realfft = "3.0.0"
 rustfft = "6.0.1"
@@ -25,6 +24,7 @@ nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug" }
 # dsp-chain = "0.13.1"
 # dsp-chain = {git="https://github.com/RustAudio/dsp-chain.git"}
 
+symphonium = "0.6.1"
 crossbeam = "0.8.1"
 atomic_float = "0.1"
 

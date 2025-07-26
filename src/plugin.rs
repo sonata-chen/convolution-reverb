@@ -37,15 +37,18 @@ impl AudioPlugin {
         if let Ok(m) = r {
             match m {
                 Message::Impulse(impulse_response) => {
-                    let mut reader =
-                        hound::WavReader::new(std::io::BufReader::new(&impulse_response[..]))
-                            .unwrap();
+                    let mut loader = symphonium::SymphoniumLoader::new();
+                    let decoded_audio = loader.load_f32_from_source(
+                        Box::new(std::io::Cursor::new(impulse_response.clone())),
+                        None,
+                        Some(48000),
+                        symphonium::ResampleQuality::High,
+                        None,
+                    ).expect("Failed to read samples");
 
-                    let channels = reader.spec().channels as usize;
-                    let sample_rate = reader.spec().sample_rate;
-                    let mut iter = reader.samples::<f32>();
-                    let length = iter.len();
-                    let frames = length / channels;
+                    let channels = decoded_audio.channels();
+                    let sample_rate = decoded_audio.sample_rate;
+                    let frames = decoded_audio.frames();
 
                     eprintln!("The number of channels in the impulse response: {channels}");
                     eprintln!("Sample rate of the impulse response: {sample_rate}");
@@ -53,14 +56,7 @@ impl AudioPlugin {
                         "The number of samples per channel in the the impulse response: {frames}"
                     );
 
-                    let mut ir: Vec<Vec<f32>> = vec![vec![0.0f32; frames]; channels];
-                    for f in 0..frames {
-                        for i in 0..channels {
-                            ir[i][f] = iter.next().unwrap().expect("Failed to read samples");
-                        }
-                    }
-
-                    self.convolution_node.load_impulse_response(&ir);
+                    self.convolution_node.load_impulse_response(&decoded_audio.data);
                     *params.impulse.lock().unwrap() = impulse_response;
                 }
             }

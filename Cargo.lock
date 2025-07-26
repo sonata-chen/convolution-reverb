@@ -937,7 +937,6 @@ version = "0.1.0"
 dependencies = [
  "atomic_float",
  "crossbeam",
- "hound",
  "nih_plug",
  "nih_plug_vizia",
  "plotters",
@@ -945,6 +944,7 @@ dependencies = [
  "realfft",
  "rfd",
  "rustfft",
+ "symphonium",
 ]
 
 [[package]]
@@ -1354,6 +1354,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "encoding_rs"
+version = "0.8.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1429,6 +1438,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "extended"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9673d8203fcb076b19dfd17e38b3d4ae9f44959416ea532ce72415a6020365"
+
+[[package]]
+name = "fast-interleave"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a7e05e2b3c97d4516fa5c177133f3e4decf9c8318841e1545b260535311e3a5"
+
+[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1471,6 +1492,17 @@ dependencies = [
  "unicode-segmentation",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "fixed-resample"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aec969062ed48a59113e902870e5d6ba3991a8ca3afe78d01708a62af5ed229c"
+dependencies = [
+ "arrayvec",
+ "fast-interleave",
+ "rubato",
 ]
 
 [[package]]
@@ -2018,12 +2050,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hound"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "iana-time-zone"
@@ -3472,6 +3498,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rubato"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5258099699851cfd0082aeb645feb9c084d9a5e1f1b8d5372086b989fc5e56a1"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3814,6 +3852,113 @@ dependencies = [
  "skrifa",
  "yazi",
  "zeno",
+]
+
+[[package]]
+name = "symphonia"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "815c942ae7ee74737bb00f965fa5b5a2ac2ce7b6c01c0cc169bbeaf7abd5f5a9"
+dependencies = [
+ "lazy_static",
+ "symphonia-codec-pcm",
+ "symphonia-codec-vorbis",
+ "symphonia-core",
+ "symphonia-format-ogg",
+ "symphonia-format-riff",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-codec-pcm"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f395a67057c2ebc5e84d7bb1be71cce1a7ba99f64e0f0f0e303a03f79116f89b"
+dependencies = [
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-codec-vorbis"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a98765fb46a0a6732b007f7e2870c2129b6f78d87db7987e6533c8f164a9f30"
+dependencies = [
+ "log",
+ "symphonia-core",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-core"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "798306779e3dc7d5231bd5691f5a813496dc79d3f56bf82e25789f2094e022c3"
+dependencies = [
+ "arrayvec",
+ "bitflags 1.3.2",
+ "bytemuck",
+ "lazy_static",
+ "log",
+ "rustfft",
+]
+
+[[package]]
+name = "symphonia-format-ogg"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ada3505789516bcf00fc1157c67729eded428b455c27ca370e41f4d785bfa931"
+dependencies = [
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+ "symphonia-utils-xiph",
+]
+
+[[package]]
+name = "symphonia-format-riff"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05f7be232f962f937f4b7115cbe62c330929345434c834359425e043bfd15f50"
+dependencies = [
+ "extended",
+ "log",
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-metadata"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc622b9841a10089c5b18e99eb904f4341615d5aa55bbf4eedde1be721a4023c"
+dependencies = [
+ "encoding_rs",
+ "lazy_static",
+ "log",
+ "symphonia-core",
+]
+
+[[package]]
+name = "symphonia-utils-xiph"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "484472580fa49991afda5f6550ece662237b00c6f562c7d9638d1b086ed010fe"
+dependencies = [
+ "symphonia-core",
+ "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonium"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97f008dd002293fd7b2f1dd5bc2d4dd8068fd00158ae3389cc0aafc40d589c72"
+dependencies = [
+ "fixed-resample",
+ "log",
+ "symphonia",
 ]
 
 [[package]]
