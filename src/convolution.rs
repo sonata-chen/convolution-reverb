@@ -284,29 +284,17 @@ impl Convolution {
             is_stereo: false,
         }
     }
-    pub fn load_impulse_response<T>(&mut self, impulse_response: &[T])
-    where
-        T: AsRef<[f32]>,
-    {
-        let length = impulse_response.len();
 
-        if length == 0 {
-            return;
+    pub fn swap(&mut self, engines: Vec<ConvolutionEngine>) {
+        let mut tmp = Some(engines);
+        std::mem::swap(&mut self.engines, &mut tmp);
+
+        if let Some(t) = tmp {
+            t.leak();
+            eprintln!("{}:{} ########### FIXME LEAKING ###########", file!(), line!());
         }
-
-        let length = if length > 2 { 2 } else { length };
-        self.num_channels = length;
-        self.is_stereo = length == 2;
-
-        let mut engines = std::vec::Vec::with_capacity(self.num_channels);
-        for i in 0..length {
-            engines.push(ConvolutionEngine::new(
-                impulse_response[i].as_ref(),
-                self.latency,
-            ));
-        }
-        self.engines = Some(engines);
     }
+
     pub fn process<I, O>(&mut self, input: &[I], output: &mut [O])
     where
         I: AsRef<[f32]>,

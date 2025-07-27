@@ -1,3 +1,5 @@
+use crate::ConvolutionReverb;
+use nih_plug::context::gui::AsyncExecutor;
 use nih_plug::prelude::Editor;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::*;
@@ -5,8 +7,7 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::plugin;
-use crate::plugin::Message;
+use crate::BackgroundTask;
 use crate::PlugParams;
 
 /// VIZIA uses points instead of pixels for text
@@ -15,7 +16,7 @@ const POINT_SCALE: f32 = 0.75;
 #[derive(Lens)]
 struct AppData {
     params: Arc<PlugParams>,
-    tx: crossbeam::channel::Sender<Message>,
+    async_executor: AsyncExecutor<ConvolutionReverb>,
 }
 
 #[derive(Debug)]
@@ -33,7 +34,8 @@ impl Model for AppData {
                 let path = rfd::FileDialog::new().pick_file().unwrap_or(path);
                 let file = std::fs::read(path).expect("Failed to read the impule!");
 
-                self.tx.send(plugin::Message::Impulse(file)).unwrap();
+                self.async_executor
+                    .execute_background(BackgroundTask::Impulse(file))
             }
         });
     }
@@ -47,41 +49,45 @@ pub(crate) fn default_state() -> Arc<ViziaState> {
 pub(crate) fn create(
     params: Arc<PlugParams>,
     editor_state: Arc<ViziaState>,
-    tx: crossbeam::channel::Sender<plugin::Message>,
+    async_executor: AsyncExecutor<ConvolutionReverb>,
 ) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, _| {
-        assets::register_noto_sans_thin(cx);
+    create_vizia_editor(
+        editor_state,
+        ViziaTheming::Custom,
+        move |cx, _gui_context| {
+            assets::register_noto_sans_thin(cx);
 
-        AppData {
-            params: params.clone(),
-            tx: tx.clone(),
-        }
-        .build(cx);
+            AppData {
+                params: params.clone(),
+                async_executor: async_executor.clone(),
+            }
+            .build(cx);
 
-        VStack::new(cx, |cx| {
-            Label::new(cx, "Gain GUI")
-                .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
-                .font_weight(FontWeightKeyword::Thin)
-                .font_size(40.0 * POINT_SCALE)
-                .height(Pixels(150.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Pixels(0.0));
+            VStack::new(cx, |cx| {
+                Label::new(cx, "Gain GUI")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Thin)
+                    .font_size(40.0 * POINT_SCALE)
+                    .height(Pixels(150.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Pixels(0.0));
 
-            // NOTE: VIZIA adds 1 pixel of additional height to these labels, so we'll need to
-            //       compensate for that
-            Label::new(cx, "Gain").bottom(Pixels(-1.0));
-            ParamSlider::new(cx, AppData::params, |params| &params.gain).height(Pixels(150.0));
+                // NOTE: VIZIA adds 1 pixel of additional height to these labels, so we'll need to
+                //       compensate for that
+                Label::new(cx, "Gain").bottom(Pixels(-1.0));
+                ParamSlider::new(cx, AppData::params, |params| &params.gain);
 
-            Button::new(
-                cx,
-                |cx| cx.emit(AppEvent::LoadImpuseResponse),
-                |cx| Label::new(cx, "load").width(Pixels(50.0)),
-            );
-        })
-        .row_between(Pixels(0.0))
-        .child_left(Stretch(1.0))
-        .child_right(Stretch(1.0));
+                Button::new(
+                    cx,
+                    |cx| cx.emit(AppEvent::LoadImpuseResponse),
+                    |cx| Label::new(cx, "load").width(Pixels(50.0)),
+                );
+            })
+            .row_between(Pixels(0.0))
+            .child_left(Stretch(1.0))
+            .child_right(Stretch(1.0));
 
-        ResizeHandle::new(cx);
-    })
+            ResizeHandle::new(cx);
+        },
+    )
 }

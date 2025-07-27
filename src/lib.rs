@@ -3,22 +3,28 @@
 
 use nih_plug::prelude::*;
 use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
-use plugin::Message;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+mod allocator;
 mod convolution;
 mod editor;
 mod fft;
 mod plugin;
-mod allocator;
+
+use convolution::ConvolutionEngine;
+
+enum Message {
+    Engine(Vec<ConvolutionEngine>),
+}
 
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
 pub struct ConvolutionReverb {
     params: Arc<PlugParams>,
 
     internal: plugin::AudioPlugin,
-    tx: crossbeam::channel::Sender<plugin::Message>,
+    tx: crossbeam::channel::Sender<Message>,
+    rx: crossbeam::channel::Receiver<Message>,
     input_buffer: Vec<Vec<f32>>,
 
     /// Needed to normalize the peak meter's response based on the sample rate.
@@ -48,14 +54,21 @@ struct PlugParams {
     impulse: Arc<Mutex<Vec<u8>>>,
 }
 
+#[derive(Debug)]
+pub enum BackgroundTask {
+    Impulse(Vec<u8>),
+}
+
 impl Default for ConvolutionReverb {
     fn default() -> Self {
-        let (tx, plugin) = plugin::AudioPlugin::new();
+        let plugin = plugin::AudioPlugin::new();
+        let (tx, rx) = crossbeam::channel::bounded(1024);
         Self {
             params: Arc::new(PlugParams::default()),
 
             internal: plugin,
             tx,
+            rx,
             input_buffer: Vec::new(),
 
             peak_meter_decay_weight: 1.0,
@@ -106,7 +119,7 @@ impl Plugin for ConvolutionReverb {
         },
     ];
     type SysExMessage = ();
-    type BackgroundTask = ();
+    type BackgroundTask = BackgroundTask;
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
@@ -114,11 +127,12 @@ impl Plugin for ConvolutionReverb {
         self.params.clone()
     }
 
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         editor::create(
             self.params.clone(),
             self.params.editor_state.clone(),
-            self.tx.clone(),
+            async_executor,
+            // self.tx.clone(),
         )
     }
 
@@ -126,7 +140,7 @@ impl Plugin for ConvolutionReverb {
         &mut self,
         audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         // TODO: How do you tie this exponential decay to an actual time span?
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
@@ -136,9 +150,9 @@ impl Plugin for ConvolutionReverb {
             vec![0.0; buffer_config.max_buffer_size as usize],
         );
         {
-            let ir = self.params.impulse.lock().unwrap();
+            let ir = self.params.impulse.lock().unwrap().clone();
             if !ir.is_empty() {
-                self.tx.send(Message::Impulse(ir.clone())).unwrap();
+                context.execute(BackgroundTask::Impulse(ir));
             }
         }
 
@@ -179,6 +193,14 @@ impl Plugin for ConvolutionReverb {
             }
         }
         */
+        let message = self.rx.try_recv();
+        if let Ok(m) = message {
+            match m {
+                Message::Engine(engines) => {
+                    self.internal.swap(engines);
+                }
+            }
+        }
         if !self.params.bypassed.value() {
             let num_channels = buffer.channels();
             let num_frames = buffer.samples();
@@ -203,6 +225,51 @@ impl Plugin for ConvolutionReverb {
         }
 
         ProcessStatus::Normal
+    }
+
+    fn task_executor(&mut self) -> TaskExecutor<Self> {
+        let tx = self.tx.clone();
+        let impulse = self.params.impulse.clone();
+        Box::new(move |task| match task {
+            BackgroundTask::Impulse(impulse_response) => {
+                let mut loader = symphonium::SymphoniumLoader::new();
+                let decoded_audio = loader
+                    .load_f32_from_source(
+                        Box::new(std::io::Cursor::new(impulse_response.clone())),
+                        None,
+                        Some(48000),
+                        symphonium::ResampleQuality::High,
+                        None,
+                    )
+                    .expect("Failed to read samples");
+
+                let channels = decoded_audio.channels();
+                let sample_rate = decoded_audio.sample_rate;
+                let frames = decoded_audio.frames();
+
+                eprintln!("The number of channels in the impulse response: {channels}");
+                eprintln!("Sample rate of the impulse response: {sample_rate}");
+                eprintln!(
+                    "The number of samples per channel in the the impulse response: {frames}"
+                );
+
+                let length = decoded_audio.data.len();
+
+                if length == 0 {
+                    return;
+                }
+
+                let length = if length > 2 { 2 } else { length };
+
+                let mut engines = std::vec::Vec::with_capacity(length);
+                for i in 0..length {
+                    engines.push(ConvolutionEngine::new(&decoded_audio.data[i], 1024));
+                }
+
+                *impulse.lock().unwrap() = impulse_response;
+                tx.send(Message::Engine(engines)).unwrap();
+            }
+        })
     }
 }
 
