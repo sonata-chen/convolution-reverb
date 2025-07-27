@@ -35,7 +35,7 @@ impl Model for AppData {
                 let file = std::fs::read(path).expect("Failed to read the impule!");
 
                 self.async_executor
-                    .execute_background(BackgroundTask::Impulse(file))
+                    .execute_background(BackgroundTask::OpenImpulse(file))
             }
         });
     }

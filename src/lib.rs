@@ -15,12 +15,14 @@ mod plugin;
 use convolution::ConvolutionEngine;
 
 enum Message {
+    Impulse(Vec<u8>),
     Engine(Vec<ConvolutionEngine>),
 }
 
 /// This is mostly identical to the gain example, minus some fluff, and with a GUI.
 pub struct ConvolutionReverb {
     params: Arc<PlugParams>,
+    sample_rate: u32,
 
     internal: plugin::AudioPlugin,
     tx: crossbeam::channel::Sender<Message>,
@@ -56,7 +58,8 @@ struct PlugParams {
 
 #[derive(Debug)]
 pub enum BackgroundTask {
-    Impulse(Vec<u8>),
+    OpenImpulse(Vec<u8>),
+    ProcessImpulse(Vec<u8>, u32),
 }
 
 impl Default for ConvolutionReverb {
@@ -65,6 +68,7 @@ impl Default for ConvolutionReverb {
         let (tx, rx) = crossbeam::channel::bounded(1024);
         Self {
             params: Arc::new(PlugParams::default()),
+            sample_rate: 0,
 
             internal: plugin,
             tx,
@@ -132,7 +136,6 @@ impl Plugin for ConvolutionReverb {
             self.params.clone(),
             self.params.editor_state.clone(),
             async_executor,
-            // self.tx.clone(),
         )
     }
 
@@ -144,6 +147,7 @@ impl Plugin for ConvolutionReverb {
     ) -> bool {
         // TODO: How do you tie this exponential decay to an actual time span?
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
+        self.sample_rate = buffer_config.sample_rate as u32;
 
         self.input_buffer.resize(
             audio_io_layout.main_input_channels.unwrap().into_integer() as usize,
@@ -152,7 +156,7 @@ impl Plugin for ConvolutionReverb {
         {
             let ir = self.params.impulse.lock().unwrap().clone();
             if !ir.is_empty() {
-                context.execute(BackgroundTask::Impulse(ir));
+                context.execute(BackgroundTask::OpenImpulse(ir));
             }
         }
 
@@ -163,39 +167,17 @@ impl Plugin for ConvolutionReverb {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        /*
-        for channel_samples in buffer.iter_samples() {
-            let mut amplitude = 0.0;
-            let num_samples = channel_samples.len();
-
-            let gain = self.params.gain.smoothed.next();
-            for sample in channel_samples {
-                *sample *= util::db_to_gain(gain);
-                amplitude += *sample;
-            }
-
-            // To save resources, a plugin can (and probably should!) only perform expensive
-            // calculations that are only displayed on the GUI while the GUI is open
-            if self.editor_state.is_open() {
-                amplitude = (amplitude / num_samples as f32).abs();
-                let current_peak_meter = self.peak_meter.load(std::sync::atomic::Ordering::Relaxed);
-                let new_peak_meter = if amplitude > current_peak_meter {
-                    amplitude
-                } else {
-                    current_peak_meter * self.peak_meter_decay_weight
-                        + amplitude * (1.0 - self.peak_meter_decay_weight)
-                };
-
-                self.peak_meter
-                    .store(new_peak_meter, std::sync::atomic::Ordering::Relaxed)
-            }
-        }
-        */
         let message = self.rx.try_recv();
         if let Ok(m) = message {
             match m {
+                Message::Impulse(impulse_response) => {
+                    context.execute_background(BackgroundTask::ProcessImpulse(
+                        impulse_response,
+                        self.sample_rate,
+                    ));
+                }
                 Message::Engine(engines) => {
                     self.internal.swap(engines);
                 }
@@ -230,14 +212,18 @@ impl Plugin for ConvolutionReverb {
     fn task_executor(&mut self) -> TaskExecutor<Self> {
         let tx = self.tx.clone();
         let impulse = self.params.impulse.clone();
+
         Box::new(move |task| match task {
-            BackgroundTask::Impulse(impulse_response) => {
+            BackgroundTask::OpenImpulse(impulse_response) => {
+                tx.send(Message::Impulse(impulse_response)).unwrap();
+            }
+            BackgroundTask::ProcessImpulse(impulse_response,sample_rate) => {
                 let mut loader = symphonium::SymphoniumLoader::new();
                 let decoded_audio = loader
                     .load_f32_from_source(
                         Box::new(std::io::Cursor::new(impulse_response.clone())),
                         None,
-                        Some(48000),
+                        Some(sample_rate),
                         symphonium::ResampleQuality::High,
                         None,
                     )
