@@ -2,7 +2,7 @@
 #![feature(allocator_api)]
 
 use nih_plug::prelude::*;
-use nih_plug_vizia::{vizia::vg::rgb::bytemuck::Contiguous, ViziaState};
+use nih_plug_vizia::ViziaState;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -27,7 +27,6 @@ pub struct ConvolutionReverb {
     internal: plugin::AudioPlugin,
     tx: crossbeam::channel::Sender<Message>,
     rx: crossbeam::channel::Receiver<Message>,
-    input_buffer: Vec<Vec<f32>>,
 
     /// Needed to normalize the peak meter's response based on the sample rate.
     peak_meter_decay_weight: f32,
@@ -43,6 +42,9 @@ pub struct ConvolutionReverb {
 struct PlugParams {
     #[id = "gain"]
     pub gain: FloatParam,
+
+    #[id = "mix"]
+    pub mix: FloatParam,
 
     #[id = "bypassed"]
     pub bypassed: BoolParam,
@@ -73,7 +75,6 @@ impl Default for ConvolutionReverb {
             internal: plugin,
             tx,
             rx,
-            input_buffer: Vec::new(),
 
             peak_meter_decay_weight: 1.0,
         }
@@ -83,17 +84,36 @@ impl Default for ConvolutionReverb {
 impl Default for PlugParams {
     fn default() -> Self {
         Self {
+            // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
+            // to treat these kinds of parameters as if we were dealing with decibels. Storing this
+            // as decibels is easier to work with, but requires a conversion for every sample.
             gain: FloatParam::new(
                 "Gain",
-                0.0,
-                FloatRange::Linear {
-                    min: -30.0,
-                    max: 30.0,
+                util::db_to_gain(0.0),
+                FloatRange::Skewed {
+                    min: util::db_to_gain(-30.0),
+                    max: util::db_to_gain(30.0),
+                    // This makes the range appear as if it was linear when displaying the values as
+                    // decibels
+                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
                 },
             )
-            .with_smoother(SmoothingStyle::Linear(50.0))
-            .with_step_size(0.01)
-            .with_unit(" dB"),
+            // Because the gain parameter is stored as linear gain instead of storing the value as
+            // decibels, we need logarithmic smoothing
+            .with_smoother(SmoothingStyle::Logarithmic(50.0))
+            .with_unit(" dB")
+            // There are many predefined formatters we can use here. If the gain was stored as
+            // decibels instead of as a linear gain value, we could have also used the
+            // `.with_step_size(0.1)` function to get internal rounding.
+            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            mix: FloatParam::new("Mix", 0.25, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(50.0))
+                // .with_step_size(0.01)
+                // .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+                // .with_string_to_value(formatters::s2v_f32_gain_to_db())
+                .with_unit(" dB"),
 
             bypassed: BoolParam::new("Bypassed", false),
             editor_state: editor::default_state(),
@@ -141,7 +161,7 @@ impl Plugin for ConvolutionReverb {
 
     fn initialize(
         &mut self,
-        audio_io_layout: &AudioIOLayout,
+        _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
@@ -149,10 +169,6 @@ impl Plugin for ConvolutionReverb {
         self.peak_meter_decay_weight = 0.9992f32.powf(44_100.0 / buffer_config.sample_rate);
         self.sample_rate = buffer_config.sample_rate as u32;
 
-        self.input_buffer.resize(
-            audio_io_layout.main_input_channels.unwrap().into_integer() as usize,
-            vec![0.0; buffer_config.max_buffer_size as usize],
-        );
         {
             let ir = self.params.impulse.lock().unwrap().clone();
             if !ir.is_empty() {
@@ -184,25 +200,36 @@ impl Plugin for ConvolutionReverb {
             }
         }
         if !self.params.bypassed.value() {
-            let num_channels = buffer.channels();
-            let num_frames = buffer.samples();
-            for c in 0..num_channels {
-                for s in 0..num_frames {
-                    self.input_buffer[c][s] = buffer.as_slice_immutable()[c][s];
+            const MAX_BLOCK_LEN: usize = 1024;
+            let mut drys = [[0.0; MAX_BLOCK_LEN]; 2];
+
+            for channels in buffer.iter_blocks(MAX_BLOCK_LEN) {
+                let mut blocks: [&mut [f32]; 2] = [&mut [], &mut []];
+
+                let num_channels = channels.1.channels();
+                let num_samples = channels.1.samples();
+                let mut iter = channels.1.into_iter();
+                for i in 0..num_channels {
+                    let channel = iter.next().unwrap();
+                    drys[i][..num_samples].copy_from_slice(channel);
+                    blocks[i] = channel;
                 }
-            }
-            self.internal
-                .process(&self.input_buffer, buffer.as_slice(), &self.params);
-        }
 
-        for channel_samples in buffer.iter_samples() {
-            // let mut amplitude = 0.0;
-            // let num_samples = channel_samples.len();
+                self.internal.process(&drys, &mut blocks, &self.params);
 
-            let gain = self.params.gain.smoothed.next();
-            for sample in channel_samples {
-                *sample *= util::db_to_gain(gain);
-                // amplitude += *sample;
+                let mut gains = [0.0_f32; MAX_BLOCK_LEN];
+                let mut mixes = [0.0_f32; MAX_BLOCK_LEN];
+                self.params
+                    .gain
+                    .smoothed
+                    .next_block(&mut gains, num_samples);
+                self.params.mix.smoothed.next_block(&mut mixes, num_samples);
+                for (dry, wet) in drys.iter().zip(blocks.iter_mut()) {
+                    for s in 0..num_samples {
+                        wet[s] = wet[s] * mixes[s] + dry[s] * (1.0 - mixes[s]);
+                        wet[s] *= gains[s];
+                    }
+                }
             }
         }
 
@@ -217,7 +244,7 @@ impl Plugin for ConvolutionReverb {
             BackgroundTask::OpenImpulse(impulse_response) => {
                 tx.send(Message::Impulse(impulse_response)).unwrap();
             }
-            BackgroundTask::ProcessImpulse(impulse_response,sample_rate) => {
+            BackgroundTask::ProcessImpulse(impulse_response, sample_rate) => {
                 let mut loader = symphonium::SymphoniumLoader::new();
                 let decoded_audio = loader
                     .load_f32_from_source(

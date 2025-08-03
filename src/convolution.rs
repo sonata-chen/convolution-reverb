@@ -116,7 +116,7 @@ impl ConvolutionEngine {
     }
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) {
         // assert_ne!(input.len(), output.len());
-        let num_samples = input.len();
+        let num_samples = output.len();
 
         let mut num_processed_samples = 0;
 
