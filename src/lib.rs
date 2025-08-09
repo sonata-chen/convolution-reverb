@@ -2,11 +2,12 @@
 #![feature(allocator_api)]
 
 use nih_plug::prelude::*;
-use nih_plug_vizia::ViziaState;
+use vizia_plug::ViziaState;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 mod allocator;
+mod browser;
 mod convolution;
 mod editor;
 mod fft;
@@ -91,11 +92,11 @@ impl Default for PlugParams {
                 "Gain",
                 util::db_to_gain(0.0),
                 FloatRange::Skewed {
-                    min: util::db_to_gain(-30.0),
-                    max: util::db_to_gain(30.0),
+                    min: util::db_to_gain(-15.0),
+                    max: util::db_to_gain(15.0),
                     // This makes the range appear as if it was linear when displaying the values as
                     // decibels
-                    factor: FloatRange::gain_skew_factor(-30.0, 30.0),
+                    factor: FloatRange::gain_skew_factor(-15.0, 15.0),
                 },
             )
             // Because the gain parameter is stored as linear gain instead of storing the value as
@@ -111,9 +112,9 @@ impl Default for PlugParams {
             mix: FloatParam::new("Mix", 0.25, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0))
                 // .with_step_size(0.01)
-                // .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+                .with_value_to_string(formatters::v2s_f32_percentage(2))
                 // .with_string_to_value(formatters::s2v_f32_gain_to_db())
-                .with_unit(" dB"),
+                .with_unit(" %"),
 
             bypassed: BoolParam::new("Bypassed", false),
             editor_state: editor::default_state(),
@@ -199,36 +200,39 @@ impl Plugin for ConvolutionReverb {
                 }
             }
         }
-        if !self.params.bypassed.value() {
-            const MAX_BLOCK_LEN: usize = 1024;
-            let mut drys = [[0.0; MAX_BLOCK_LEN]; 2];
 
-            for channels in buffer.iter_blocks(MAX_BLOCK_LEN) {
-                let mut blocks: [&mut [f32]; 2] = [&mut [], &mut []];
+        if self.params.bypassed.value() {
+            return ProcessStatus::Normal;
+        }
 
-                let num_channels = channels.1.channels();
-                let num_samples = channels.1.samples();
-                let mut iter = channels.1.into_iter();
-                for i in 0..num_channels {
-                    let channel = iter.next().unwrap();
-                    drys[i][..num_samples].copy_from_slice(channel);
-                    blocks[i] = channel;
-                }
+        const MAX_BLOCK_LEN: usize = 1024;
+        let mut drys = [[0.0; MAX_BLOCK_LEN]; 2];
 
-                self.internal.process(&drys, &mut blocks, &self.params);
+        for channels in buffer.iter_blocks(MAX_BLOCK_LEN) {
+            let mut blocks: [&mut [f32]; 2] = [&mut [], &mut []];
 
-                let mut gains = [0.0_f32; MAX_BLOCK_LEN];
-                let mut mixes = [0.0_f32; MAX_BLOCK_LEN];
-                self.params
-                    .gain
-                    .smoothed
-                    .next_block(&mut gains, num_samples);
-                self.params.mix.smoothed.next_block(&mut mixes, num_samples);
-                for (dry, wet) in drys.iter().zip(blocks.iter_mut()) {
-                    for s in 0..num_samples {
-                        wet[s] = wet[s] * mixes[s] + dry[s] * (1.0 - mixes[s]);
-                        wet[s] *= gains[s];
-                    }
+            let num_channels = channels.1.channels();
+            let num_samples = channels.1.samples();
+            let mut iter = channels.1.into_iter();
+            for i in 0..num_channels {
+                let channel = iter.next().unwrap();
+                drys[i][..num_samples].copy_from_slice(channel);
+                blocks[i] = channel;
+            }
+
+            self.internal.process(&drys, &mut blocks, &self.params);
+
+            let mut gains = [0.0_f32; MAX_BLOCK_LEN];
+            let mut mixes = [0.0_f32; MAX_BLOCK_LEN];
+            self.params
+                .gain
+                .smoothed
+                .next_block(&mut gains, num_samples);
+            self.params.mix.smoothed.next_block(&mut mixes, num_samples);
+            for (dry, wet) in drys.iter().zip(blocks.iter_mut()) {
+                for s in 0..num_samples {
+                    wet[s] = wet[s] * mixes[s] + dry[s] * (1.0 - mixes[s]);
+                    wet[s] *= gains[s];
                 }
             }
         }

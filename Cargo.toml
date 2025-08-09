@@ -11,22 +11,18 @@ crate-type = ["cdylib", "lib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# jack = "0.8.4"
-realfft = "3.0.0"
-rustfft = "6.0.1"
-rfd = "0.8.2"
-# vizia = { git = "https://github.com/vizia/vizia.git", rev = "b2f100d" }
 rand = "0.8.5"
-plotters = "0.3.1"
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["assert_process_allocs", "standalone"] }
-# nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["standalone"] }
-nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug" }
-# dsp-chain = "0.13.1"
-# dsp-chain = {git="https://github.com/RustAudio/dsp-chain.git"}
-
 symphonium = "0.6.1"
 crossbeam = "0.8.1"
 atomic_float = "0.1"
+glob = "0.3.2"
+
+realfft = "3.0.0"
+rustfft = "6.0.1"
+
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["assert_process_allocs", "standalone"] }
+vizia_plug = { git = "https://github.com/vizia/vizia-plug" }
+
 
 [workspace]
 members = ["xtask"]

@@ -1,17 +1,16 @@
-use crate::ConvolutionReverb;
 use nih_plug::context::gui::AsyncExecutor;
 use nih_plug::prelude::Editor;
-use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::widgets::*;
-use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
-use std::path::PathBuf;
 use std::sync::Arc;
+use vizia_plug::vizia::prelude::*;
+use vizia_plug::widgets::*;
+use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
+use crate::browser::{FileChooser, FileChooserModifiers};
 use crate::BackgroundTask;
+use crate::ConvolutionReverb;
 use crate::PlugParams;
 
-/// VIZIA uses points instead of pixels for text
-const POINT_SCALE: f32 = 0.75;
+pub const NOTO_SANS: &str = "Noto Sans";
 
 #[derive(Lens)]
 struct AppData {
@@ -21,18 +20,14 @@ struct AppData {
 
 #[derive(Debug)]
 pub enum AppEvent {
-    // ToggleBypassed,
-    // SetGain(f32),
-    LoadImpuseResponse,
+    OpenImpuseResponse(String),
 }
 
 impl Model for AppData {
     fn event(&mut self, _: &mut EventContext, event: &mut Event) {
         event.map(|app_event, _| match app_event {
-            AppEvent::LoadImpuseResponse => {
-                let path = PathBuf::from("data/ir.wav");
-                let path = rfd::FileDialog::new().pick_file().unwrap_or(path);
-                let file = std::fs::read(path).expect("Failed to read the impule!");
+            AppEvent::OpenImpuseResponse(f) => {
+                let file = std::fs::read(&f).expect("Failed to read the impule!");
 
                 self.async_executor
                     .execute_background(BackgroundTask::OpenImpulse(file))
@@ -43,7 +38,7 @@ impl Model for AppData {
 
 // Makes sense to also define this here, makes it a bit easier to keep track of
 pub(crate) fn default_state() -> Arc<ViziaState> {
-    ViziaState::new(|| (600, 600))
+    ViziaState::new(|| (500, 500))
 }
 
 pub(crate) fn create(
@@ -55,8 +50,6 @@ pub(crate) fn create(
         editor_state,
         ViziaTheming::Custom,
         move |cx, _gui_context| {
-            assets::register_noto_sans_thin(cx);
-
             AppData {
                 params: params.clone(),
                 async_executor: async_executor.clone(),
@@ -65,29 +58,22 @@ pub(crate) fn create(
 
             VStack::new(cx, |cx| {
                 Label::new(cx, "Gain GUI")
-                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
-                    .font_weight(FontWeightKeyword::Thin)
-                    .font_size(40.0 * POINT_SCALE)
-                    .height(Pixels(150.0))
-                    .child_top(Stretch(1.0))
-                    .child_bottom(Pixels(0.0));
+                    .font_family(vec![FamilyOwned::Named(String::from(NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Normal);
 
-                // NOTE: VIZIA adds 1 pixel of additional height to these labels, so we'll need to
-                //       compensate for that
-                Label::new(cx, "Gain").bottom(Pixels(-1.0));
+                Label::new(cx, "Gain");
                 ParamSlider::new(cx, AppData::params, |params| &params.gain);
 
-                Button::new(
-                    cx,
-                    |cx| cx.emit(AppEvent::LoadImpuseResponse),
-                    |cx| Label::new(cx, "load").width(Pixels(50.0)),
-                );
-            })
-            .row_between(Pixels(0.0))
-            .child_left(Stretch(1.0))
-            .child_right(Stretch(1.0));
+                Label::new(cx, "Mix");
+                ParamSlider::new(cx, AppData::params, |params| &params.mix);
 
-            ResizeHandle::new(cx);
+                ParamButton::new(cx, AppData::params, |params| &params.bypassed);
+
+                FileChooser::new(cx).on_pick(|cx, f| cx.emit(AppEvent::OpenImpuseResponse(f)));
+            })
+            .gap(Pixels(5.0))
+            .border_width(Pixels(20.0))
+            .alignment(Alignment::Center);
         },
     )
 }
